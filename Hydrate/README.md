@@ -1,13 +1,13 @@
 # 🥤 Hydrate — Water Reminder & Intake Tracker for Linux
 
 > _Vibe-coded water reminder and intake tracker for Linux desktops._
-  
+
 Hydrate is a small Linux desktop app that helps you record how much water you drink and reminds you when it is time for another drink.
 
-It works from your desktop panel, from the terminal (CLI) and both. Your settings and drinking history are stored locally on your computer.
+You can use it from your desktop panel, from the terminal (CLI), or both. Your settings and drinking history are stored locally on your computer.
 
 > **In simple terms:** Hydrate is a water logbook, a reminder clock and a small desktop widget in one application.
-  
+
 ---
 ## What Hydrate does
 
@@ -20,9 +20,9 @@ For example, if your configured glass size is 250 ml and you log three glasses, 
 *You can also record a custom amount, such as 500 ml.*
 ### 2. Shows your progress on the desktop
 
-The panel indicator shows a small glass that fills as you record water. It also displays your current total and daily target 
+The panel indicator shows a small glass that fills as you record water. It also displays your current total and daily target.
 
-For Example: `1.5 / 2.5 L`
+For example: `1.5 / 2.5 L`
 
 ![image](images/panel_indicator.png)
 
@@ -43,7 +43,7 @@ Open the Hydrate panel to see:
 Move between weeks with the on-screen arrows or the left and right arrow keys. Hover over a chart bar or day label to see the exact amount recorded for that day.
 ### 4. Sends reminders
 
-Hydrate can remind you at a regular interval during your chosen hours. 
+Hydrate can remind you at a regular interval during your chosen hours.
 
 ![image](images/alert.png)
 
@@ -87,7 +87,7 @@ git clone https://github.com/TejaNune1998/Apps-Built-for-Linux.git
 cd Apps-Built-for-Linux/Hydrate
 ```
 
-Or download and extract the ZIP file, then open a terminal in the extracted `Apps-Built-for-Linux/Hydrate` folder.
+Or download and extract the repository ZIP file, then open a terminal in the `Hydrate` directory inside the extracted repository folder.
 ### 2. Run the installer
 
 ```bash
@@ -97,7 +97,7 @@ chmod +x install.sh
 
 The installer detects an available package manager and attempts to install the required helper programs. It then installs the `hydrate` command, creates the default configuration, sets up the reminder scheduler and detects available desktop integrations.
 
-*You do not need to run the installer as root. It uses `sudo` when it needs to install system packages.*
+You do not need to run the installer as root. It uses `sudo` when it needs to install system packages.
 
 ### 3. Choose a desktop integration (optional)
 
@@ -122,13 +122,13 @@ Normally, the installer detects Omarchy / Quickshell and Waybar automatically.
 ./install.sh --no-waybar
 ```
 
-* *You can combine options. For example:*
+You can combine options. For example:
 
 ```bash
 ./install.sh --quickshell --no-waybar
 ```
 
-*If neither panel integration is installed, you can still use Hydrate from the terminal or the desktop application launcher.*
+If neither panel integration is installed, you can still use Hydrate from the terminal or the desktop application launcher.
 
 ### 4. Check the installation
 
@@ -218,7 +218,7 @@ Use this format:
 hydrate set SETTING VALUE
 ```
 
-For Examples:
+For example:
 
 ```bash
 hydrate set interval 60
@@ -227,8 +227,6 @@ hydrate set glass 300
 hydrate set goal 2500
 hydrate set days weekdays
 ```
-
-  
 
 Available settings:
 
@@ -281,7 +279,7 @@ hydrate set day sun default
 ### Set quiet hours
 
 Quiet hours are periods when Hydrate should not show reminders. You can set more than one period, separated by commas.
-  
+
 ```bash
 hydrate set quiet 12:00-13:00,15:00-15:30
 ```
@@ -347,7 +345,6 @@ Restore from a backup:
 hydrate restore ~/Documents/hydrate-backup.tar.gz
 ```
 
-  
 Keep backups somewhere safe. Restoring a backup replaces the corresponding Hydrate settings and history with the backed-up data.
 
 ### Check and repair the installation
@@ -392,7 +389,6 @@ Hydrate keeps its files in your home directory. You normally do not need to edit
 └── install-flags
 ```
 
-  
 - `config` — your goal, glass size, reminder interval, schedule and other preferences.
 - `source` — the folder from which Hydrate was installed. The updater uses this location.
 - `install-flags` — installer options used during installation.
@@ -415,7 +411,6 @@ By default:
 
 The date in these filenames is an example.
 
-  
 - `YYYY-MM-DD.ml` — the total amount recorded for that day, in millilitres.
 - `YYYY-MM-DD.log` — individual drink entries, including their time and amount. Hydrate uses this file for the entry list and undo operation.
 - `next_due` — the next scheduled reminder time.
@@ -440,13 +435,10 @@ Common locations include:
 ---
 ## How reminders work
 
-  
 Hydrate uses a user-level systemd timer when a systemd user session is available. The timer runs a small check every minute. Hydrate checks whether a reminder is due and whether your schedule or desktop conditions say it should wait.
 
-  
 The reminder service is separate from the graphical panel. **You can close the panel and reminders can continue running.**
 
-  
 To see the timer:
 
 ```bash
@@ -485,10 +477,8 @@ Backups are stored under:
 ~/.local/share/hydrate/backups/
 ```
 
-
 Hydrate keeps your existing settings and drinking history. If the updated installation fails its verification, it restores the previous application files. Your settings and history are kept in place.
 
-  
 The updater works whether you originally installed Hydrate from a Git checkout or a ZIP archive. You do not need to manually replace files in the original extracted project folder. An internet connection and the `git`, `curl`, `unzip` and `tar` commands are required.
 
 ---
@@ -498,12 +488,10 @@ There are two removal options. Choose the one that matches what you want.
 
 ### Option 1: Uninstall the application but keep your data
 
-  
 ```bash
 hydrate uninstall
 ```
 
-  
 Hydrate asks for confirmation, removes the application and its desktop integrations, but keeps your settings and intake history. This is useful if you may install Hydrate again later.
 
 To skip the confirmation (for scripts):
@@ -518,7 +506,6 @@ hydrate uninstall --yes
 hydrate purge
 ```
 
-  
 Hydrate asks you to type `purge` before continuing. This removes the application, settings and recorded intake history. **This is permanent unless you have a backup.**
 
 To skip the confirmation (for scripts):
@@ -562,7 +549,7 @@ systemctl --user list-timers hydrate.timer
 journalctl --user -u hydrate.service -n 20 --no-pager
 ```
 
-*Also check that reminders are not paused, that the current time is inside your configured schedule, and that the daily goal has not already been reached.*
+Also check that reminders are not paused, that the current time is inside your configured schedule, and that the daily goal has not already been reached.
 
 ### Useful quick checks
 
