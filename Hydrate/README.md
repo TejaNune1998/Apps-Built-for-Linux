@@ -1,4 +1,4 @@
-# 🥤 Hydrate — Water Reminder & Intake Tracker for Linux
+# 🥤 Hydrate — Water Reminder & Intake Tracker 
 
 > _Vibe-coded water reminder and intake tracker for Linux desktops._
 
