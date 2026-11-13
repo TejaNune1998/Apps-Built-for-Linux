@@ -172,6 +172,12 @@ if have_faketime; then
   eq "week -1" '[-1,"2026-10-26",[2000,3000,0,2500,2000,4000,0],2700,1000,-1]' "$(json week -1)"
   eq "week -2" '[-2,"2026-10-19",[1000,0,0,0,0,0,0],1000,-1,-1]' "$(json week -2)"
   eq "week 0 marks today" '[0,"2026-11-02",[2250,1750,500,-1,-1,-1,-1],1500,2700,2]' "$(json week 0)"
+  "$CLI" set days weekdays >/dev/null
+  JQ='[.week, .prev_avg]'
+  eq "weekday mode excludes weekend from previous-week average" '[[2250,1750,500,-1,-1,-1,-1],2375]' "$(json state)"
+  JQ='[.offset, .week, .avg, .prev_avg]'
+  eq "weekday average excludes Saturday" '[-1,[2000,3000,0,2500,2000,4000,0],2375,1000]' "$(json week -1)"
+  "$CLI" set days all >/dev/null
   [[ "$(at '2026-11-04 10:00:00' stats -1)" == *"Week avg  2.7 L"* ]] && ok "stats -1 prints the average" || bad "stats -1"
   eq "entries for a date" "2026-11-03  1.75 L" "$(at '2026-11-04 10:00:00' entries 2026-11-03 | sed -n 1p)"
   eq "entries shows each drink" 2 "$(at '2026-11-04 10:00:00' entries 2026-11-03 | grep -c ' +250 ml')"
@@ -199,13 +205,89 @@ cp "$CLI" "$HOME/.local/bin/hydrate"
 
 echo "update"
 new_home
-# The updater is network-backed; keep the test offline and verify its safety gates/source wiring.
-grep -q 'fetch --quiet' "$CLI" && ok "update fetches the latest GitHub commit before changes" || bad "update fetches remote commit"
-grep -q 'settings-history.tar.gz' "$CLI" && ok "update backs up settings and history" || bad "update backs up user data"
-grep -q 'installation.tar.gz' "$CLI" && ok "update keeps an installation rollback archive" || bad "update rollback archive"
-grep -q 'codeload.github.com/TejaNune1998/Apps-Built-for-Linux' "$CLI" && ok "update supports the GitHub source ZIP" || bad "update source ZIP"
-grep -q 'sort -V' "$CLI" && ok "update compares versions" || bad "update version comparison"
-grep -q 'Apps-Built-for-Linux/tree/main/Hydrate' "$ROOT/install.sh" && ok "installer records the canonical Hydrate repository path" || bad "installer records source URL"
+# Exercise the updater against a local fake GitHub release; no network is used.
+FIX="$HOME/update-fixture"
+mkdir -p "$FIX/Hydrate/omarchy" "$FIX/Hydrate/bin" "$HOME/.local/bin" "$HOME/.config/hydrate" "$S"
+printf '{"version":"1.0.2"}\n' > "$FIX/Hydrate/omarchy/manifest.json"
+cat > "$FIX/Hydrate/install.sh" <<'STUBINSTALL'
+#!/usr/bin/env bash
+mkdir -p "$HOME/.local/bin" "$HOME/.config/hydrate" "$HOME/.config/systemd/user"
+cat > "$HOME/.local/bin/hydrate" <<'NEWCLI'
+#!/usr/bin/env bash
+echo 'hydrate 1.0.2'
+NEWCLI
+chmod +x "$HOME/.local/bin/hydrate"
+printf 'INTERVAL=45\nGOAL_ML=2500\n' > "$HOME/.config/hydrate/config"
+printf 'new\n' > "$HOME/.config/systemd/user/hydrate.timer"
+STUBINSTALL
+chmod +x "$FIX/Hydrate/install.sh"
+mkdir -p "$HOME/ziproot"
+cp -a "$FIX" "$HOME/ziproot/fake-release"
+(cd "$HOME/ziproot" && zip -qr "$HOME/fake-release.zip" fake-release)
+cat > "$B/curl" <<'STUBCURL'
+#!/usr/bin/env bash
+out=""; url=""
+while (($#)); do
+  case "$1" in
+    -o) out="$2"; shift 2 ;;
+    *) url="$1"; shift ;;
+  esac
+done
+[[ -n "$out" ]] || exit 2
+if [[ "$url" == *api.github.com* ]]; then
+  printf '{"zipball_url":"https://fake.invalid/release.zip"}\n' > "$out"
+elif [[ "$url" == https://fake.invalid/release.zip ]]; then
+  cp "$UPDATE_FIXTURE_ZIP" "$out"
+else
+  exit 22
+fi
+STUBCURL
+chmod +x "$B/curl"
+export UPDATE_FIXTURE_ZIP="$HOME/fake-release.zip"
+printf 'INTERVAL=90\nGOAL_ML=3500\n' > "$C/config"
+printf 'old-history\n' > "$S/2026-11-12.log"
+printf '#!/bin/sh\necho old-hydrate\n' > "$HOME/.local/bin/hydrate"
+chmod +x "$HOME/.local/bin/hydrate"
+"$CLI" update --check > "$HOME/check.out" 2>&1
+exit_is "update --check is read-only" 0 test ! -e "$HOME/.local/share/hydrate/backups"
+grep -q 'Update available: 1.0.1 -> 1.0.2' "$HOME/check.out" && ok "update --check reports a newer version" || bad "update --check output"
+"$CLI" update > "$HOME/update.out" 2>&1
+exit_is "update installs the downloaded release" 0 test -x "$HOME/.local/bin/hydrate"
+eq "update preserves existing settings" "90 3500" "$(. "$C/config"; echo "$INTERVAL $GOAL_ML")"
+eq "update preserves drinking history" "old-history" "$(cat "$S/2026-11-12.log")"
+find "$HOME/.local/share/hydrate/backups" -mindepth 2 -maxdepth 2 -name settings-history.tar.gz -type f -print -quit | grep -q . && ok "update creates a settings/history backup" || bad "settings/history backup"
+"$CLI" update --rollback > "$HOME/rollback.out" 2>&1
+[[ "$(cat "$HOME/.local/bin/hydrate")" == *old-hydrate* ]] && ok "update --rollback restores the previous CLI" || bad "rollback restores CLI"
+eq "rollback restores settings" "90 3500" "$(. "$C/config"; echo "$INTERVAL $GOAL_ML")"
+eq "rollback restores history" "old-history" "$(cat "$S/2026-11-12.log")"
+# A forced same-version reinstall is permitted, but it still creates a rollback point.
+printf '{"version":"1.0.2"}\n' > "$FIX/Hydrate/omarchy/manifest.json"
+sed -i 's/1.0.1/1.0.2/g' "$FIX/Hydrate/install.sh"
+rm -rf "$HOME/ziproot/fake-release"
+cp -a "$FIX" "$HOME/ziproot/fake-release"
+rm -f "$HOME/ziproot/fake-release.zip" "$HOME/fake-release.zip"
+(cd "$HOME/ziproot" && zip -qr "$HOME/fake-release.zip" fake-release)
+"$CLI" update --force > "$HOME/force.out" 2>&1
+exit_is "--force reinstalls the same version" 0 grep -q 'Updated successfully' "$HOME/force.out"
+# A broken installer that changes files and then fails must roll back both app and user data.
+printf '{"version":"1.0.3"}\n' > "$FIX/Hydrate/omarchy/manifest.json"
+cat > "$FIX/Hydrate/install.sh" <<'BROKENINSTALL'
+#!/usr/bin/env bash
+printf 'BROKEN=1\n' > "$HOME/.config/hydrate/config"
+printf 'partial\n' > "$HOME/.local/bin/hydrate"
+chmod +x "$HOME/.local/bin/hydrate"
+exit 42
+BROKENINSTALL
+chmod +x "$FIX/Hydrate/install.sh"
+rm -rf "$HOME/ziproot/fake-release"
+cp -a "$FIX" "$HOME/ziproot/fake-release"
+rm -f "$HOME/ziproot/fake-release.zip" "$HOME/fake-release.zip"
+(cd "$HOME/ziproot" && zip -qr "$HOME/fake-release.zip" fake-release)
+"$CLI" update > "$HOME/failed-update.out" 2>&1 && bad "failed installer should fail" || ok "failed installer is reported"
+[[ "$(cat "$HOME/.local/bin/hydrate")" == *"hydrate 1.0.2"* ]] && ok "failed update restores previous CLI" || bad "failed update CLI rollback"
+eq "failed update restores settings" "90 3500" "$(. "$C/config"; echo "$INTERVAL $GOAL_ML")"
+eq "failed update restores history" "old-history" "$(cat "$S/2026-11-12.log")"
+exit_is "unknown update options are rejected" 2 "$CLI" update --not-a-real-option
 
 echo "installer"
 new_home
@@ -218,7 +300,7 @@ eq "the update source and options are recorded" "https://github.com/TejaNune1998
 "$HOME/.local/bin/hydrate" set interval 90 >/dev/null
 bash "$ROOT/install.sh" --no-waybar >/dev/null 2>&1
 eq "reinstalling keeps your settings" 90 "$(. "$C/config"; echo "$INTERVAL")"
-grep -q 'VERSION=1.0.0' "$HOME/.local/bin/hydrate" && ok "installed CLI is version 1.0.0" || bad "installed CLI version"
+grep -q 'VERSION=1.0.1' "$HOME/.local/bin/hydrate" && ok "installed CLI is version 1.0.1" || bad "installed CLI version"
 exit_is "hydrate doctor runs" 0 "$HOME/.local/bin/hydrate" doctor
 "$HOME/.local/bin/hydrate" uninstall --yes >/dev/null 2>&1
 [[ ! -e "$HOME/.local/bin/hydrate" && ! -e "$HOME/.config/omarchy/plugins/hydrate" ]] && ok "uninstall --yes removes the command and the plugin" || bad "uninstall --yes"

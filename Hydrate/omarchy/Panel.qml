@@ -28,7 +28,7 @@ Panel {
   readonly property real viewPrev: weekOffset === 0 ? Number(st.prev_avg === undefined ? -1 : st.prev_avg)
                                    : (weekReady ? Number(weekData.prev_avg) : -1)
   readonly property int minOffset: Number(st.min_offset || 0)
-  readonly property int weekCount: 7
+  readonly property int weekCount: st.days === "weekdays" ? 5 : 7
   readonly property var dayNames: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
   function open() { root.controller.show() }
@@ -605,7 +605,7 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keys
-    contentWidth: panel.fittedContentWidth(Style.space(360))
+    contentWidth: panel.fittedContentWidth(Style.space(400))
     contentHeight: panel.fittedContentHeight(col.implicitHeight)
 
     PanelKeyCatcher {

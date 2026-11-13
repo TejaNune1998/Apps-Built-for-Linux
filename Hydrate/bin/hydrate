@@ -5,7 +5,7 @@ set -u
 conf="$HOME/.config/hydrate/config"
 st="${XDG_STATE_HOME:-$HOME/.local/state}/hydrate"
 GOAL_ML=2500; GLASS_ML=250; INTERVAL=45; START_HOUR=8; START_MINUTE=0; END_HOUR=22; END_MINUTE=0; PAUSED=0; ALERT_STYLE=auto; DAYS=all
-VERSION=1.0.0
+VERSION=1.0.1
 SNOOZE_MIN=10; QUIET=""; SKIP_LOCKED=1; SKIP_DND=1; SKIP_FULLSCREEN=1; SKIP_IDLE_MIN=0
 DAY_MON=""; DAY_TUE=""; DAY_WED=""; DAY_THU=""; DAY_FRI=""; DAY_SAT=""; DAY_SUN=""
 DAYKEYS=(mon tue wed thu fri sat sun)
@@ -142,9 +142,14 @@ week_vals() {
 week_start() { date -d "-$(( $(date +%u) - 1 + ${1:-0} * 7 )) day" +%F; }
 # average ml over the days of that week that have something logged; -1 if none
 week_avg() {
-  local vals v sum=0 cnt=0
+  local vals v i=0 sum=0 cnt=0
   IFS=, read -ra vals <<< "$(week_vals "${1:-0}")"
-  for v in "${vals[@]}"; do (( v > 0 )) && { sum=$(( sum + v )); cnt=$(( cnt + 1 )); }; done
+  for v in "${vals[@]}"; do
+    # Weekday mode applies to the chart and its averages: ignore Saturday (5) and Sunday (6).
+    if [[ "$DAYS" == weekdays ]] && (( i >= 5 )); then ((i++)); continue; fi
+    (( v > 0 )) && { sum=$(( sum + v )); cnt=$(( cnt + 1 )); }
+    ((i++))
+  done
   if (( cnt > 0 )); then echo $(( sum / cnt )); else echo -1; fi
 }
 prev_avg() { week_avg 1; }
@@ -428,100 +433,159 @@ restore_cmd() {
 # hydrate update   safely fetch the configured GitHub Hydrate subdirectory and reinstall
 update_cmd() {
   local repo="https://github.com/TejaNune1998/Apps-Built-for-Linux"
-  local branch="main" current="$VERSION" available="" commit="" tmp="" archive="" appdir="" flags="" backup_root="" data_backup="" install_backup="" rel="" path="" rc=0
-  local home_rel state_rel
-  for c in curl unzip tar sort git; do
+  local branch="main" current="$VERSION" available="" tmp="" archive="" appdir="" backup_root="" data_backup="" install_backup="" download_url="" release_json="" arg="" mode="install" rc=0 path="" latest_backup="" configured_source="" repo_path=""
+  local -a paths=() remove_paths=()
+  configured_source=$(cat "$HOME/.config/hydrate/source" 2>/dev/null || true)
+  if [[ "$configured_source" =~ ^https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)(/tree/([^/]+)/Hydrate)?/?$ ]]; then
+    repo="https://github.com/${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
+    [[ -z "${BASH_REMATCH[4]:-}" ]] || branch="${BASH_REMATCH[4]}"
+  fi
+  repo_path="${repo#https://github.com/}"
+  for arg in "$@"; do
+    case "$arg" in
+      --check)    [[ "$mode" == install ]] || { echo "Use only one update mode."; return 2; }; mode=check ;;
+      --force)    [[ "$mode" == install ]] || { echo "--force cannot be combined with another update mode."; return 2; }; mode=force ;;
+      --rollback) [[ "$mode" == install ]] || { echo "Use only one update mode."; return 2; }; mode=rollback ;;
+      *) echo "Unknown update option: $arg"; echo "Usage: hydrate update [--check|--force|--rollback]"; return 2 ;;
+    esac
+  done
+
+  if [[ "$mode" == rollback ]]; then
+    command -v tar >/dev/null 2>&1 || { echo "Missing required command: tar"; return 1; }
+    latest_backup=""
+    while IFS= read -r path; do
+      if [[ -s "$path/installation.tar.gz" && -s "$path/settings-history.tar.gz" ]]; then latest_backup="$path"; break; fi
+    done < <(find "$HOME/.local/share/hydrate/backups" -mindepth 1 -maxdepth 1 -type d -name '*-*' -print 2>/dev/null | sort -r)
+    [[ -n "$latest_backup" ]] || { echo "No complete Hydrate update backup is available."; return 1; }
+    echo "Restoring backup: $latest_backup"
+    # Remove every path the installer may have created or changed, then restore the snapshot.
+    remove_paths=(
+      "$HOME/.local/bin/hydrate"
+      "$HOME/.config/systemd/user/hydrate.service" "$HOME/.config/systemd/user/hydrate.timer"
+      "$HOME/.config/omarchy/plugins/hydrate" "$HOME/.config/omarchy/shell.json" "$HOME/.config/omarchy/shell.json.hydrate.bak"
+      "$HOME/.config/waybar/hydrate.jsonc" "$HOME/.config/waybar/config.jsonc" "$HOME/.config/waybar/config"
+      "$HOME/.config/waybar/config.jsonc.hydrate.bak" "$HOME/.config/waybar/config.hydrate.bak"
+      "$HOME/.config/autostart/hydrate.desktop" "$HOME/.local/share/applications/hydrate.desktop"
+    )
+    for path in "${remove_paths[@]}"; do rm -rf -- "$path"; done
+    tar -xzf "$latest_backup/installation.tar.gz" -C "$HOME" || { echo "Could not restore application files."; return 1; }
+    tmp=$(mktemp -d "${TMPDIR:-/tmp}/hydrate-restore.XXXXXX") || return 1
+    if ! tar -xzf "$latest_backup/settings-history.tar.gz" -C "$tmp"; then rm -rf "$tmp"; echo "Could not read settings/history backup."; return 1; fi
+    mkdir -p "$HOME/.config/hydrate" "$st"
+    [[ ! -d "$tmp/config" ]] || { rm -rf "$HOME/.config/hydrate"; mkdir -p "$HOME/.config/hydrate"; cp -a "$tmp/config/." "$HOME/.config/hydrate/"; }
+    [[ ! -d "$tmp/state" ]] || { rm -rf "$st"; mkdir -p "$st"; cp -a "$tmp/state/." "$st/"; }
+    rm -rf "$tmp"
+    systemctl --user daemon-reload >/dev/null 2>&1 || true
+    systemctl --user restart hydrate.timer >/dev/null 2>&1 || true
+    echo "Rollback complete. Settings and history restored."
+    return 0
+  fi
+
+  for c in curl unzip tar sort find; do
     command -v "$c" >/dev/null 2>&1 || { echo "Missing required command: $c"; return 1; }
   done
   echo "Hydrate update"
   echo "Current version : $current"
-
-  # Check the remote branch before touching the installation.
   tmp=$(mktemp -d "${TMPDIR:-/tmp}/hydrate-update.XXXXXX") || return 1
   trap '[[ -n "$tmp" ]] && rm -rf "$tmp"' RETURN
-  # Fetch the remote branch into a temporary repository; never touch the installed source tree.
-  git -C "$tmp" init -q || { echo "Could not initialise temporary Git checkout."; return 1; }
-  git -C "$tmp" remote add origin "$repo.git" || return 1
-  git -C "$tmp" fetch --quiet --depth=1 origin "refs/heads/$branch" || { echo "Could not fetch GitHub main. Nothing was changed."; return 1; }
-  commit=$(git -C "$tmp" rev-parse FETCH_HEAD 2>/dev/null)
-  [[ -n "$commit" ]] || { echo "Could not resolve the fetched commit. Nothing was changed."; return 1; }
-  echo "Fetched commit : ${commit:0:12}"
 
-  # Prefer the latest published release; if none exists, use the latest main-branch source archive.
-  local release_json="$tmp/release.json" download_url=""
-  if curl -fsSL --connect-timeout 10 --max-time 60 "https://api.github.com/repos/TejaNune1998/Apps-Built-for-Linux/releases/latest" -o "$release_json" 2>/dev/null; then
+  # Prefer the latest published release. If GitHub has no release, use the main branch archive.
+  release_json="$tmp/release.json"
+  if curl -fsSL --connect-timeout 10 --max-time 60 "https://api.github.com/repos/$repo_path/releases/latest" -o "$release_json" 2>/dev/null; then
     download_url=$(sed -n 's/.*"zipball_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$release_json" | head -n1)
   fi
-  if [[ -z "$download_url" ]]; then
-    download_url="https://codeload.github.com/TejaNune1998/Apps-Built-for-Linux/zip/$commit"
-  fi
+  [[ -n "$download_url" ]] || download_url="https://codeload.github.com/$repo_path/zip/refs/heads/$branch"
   archive="$tmp/source.zip"
   curl -fL --retry 2 --connect-timeout 10 --max-time 180 "$download_url" -o "$archive" || { echo "Download failed. Installation was not changed."; return 1; }
   mkdir "$tmp/unpacked"
   unzip -q "$archive" -d "$tmp/unpacked" || { echo "Could not extract source archive. Installation was not changed."; return 1; }
   appdir=$(find "$tmp/unpacked" -type f -path '*/Hydrate/install.sh' -print -quit | xargs -r dirname)
-  [[ -n "$appdir" && -x "$appdir/install.sh" ]] || { echo "The downloaded archive does not contain Hydrate/install.sh. Installation was not changed."; return 1; }
+  [[ -n "$appdir" && -f "$appdir/install.sh" ]] || { echo "The downloaded archive does not contain Hydrate/install.sh. Installation was not changed."; return 1; }
   available=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$appdir/omarchy/manifest.json" | head -n1)
   [[ -n "$available" ]] || { echo "Could not read the available version from manifest.json. Nothing was changed."; return 1; }
   echo "Available version: $available"
-  if [[ "$available" == "$current" ]]; then
+  if [[ "$(printf '%s\n%s\n' "$current" "$available" | sort -V | head -n1)" != "$current" ]]; then
+    echo "The downloaded version is older than the installed version. Downgrades are not supported."; return 1
+  fi
+  if [[ "$available" == "$current" && "$mode" != force ]]; then
     echo "Hydrate is already up to date."
+    [[ "$mode" != check ]] || echo "Check complete; no files were changed."
     return 0
   fi
-  # 6.6.0 was the pre-release development label; allow the requested 1.0.0 public release transition.
-  if [[ "$current" != "6.6.0" && "$(printf '%s\n%s\n' "$current" "$available" | sort -V | tail -n1)" == "$current" ]]; then
-    echo "The available version is not newer. No update performed."
+  if [[ "$mode" == check ]]; then
+    echo "Update available: $current -> $available"
+    echo "Check complete; no files were changed or backups created."
     return 0
   fi
 
-  # Back up configuration and history before replacing any application files.
   backup_root="$HOME/.local/share/hydrate/backups/$(date +%Y%m%d-%H%M%S)-$$"
   mkdir -p "$backup_root" "$HOME/.config/hydrate" "$st"
   data_backup="$backup_root/settings-history.tar.gz"
-  tar -czf "$data_backup" -C / "${HOME#/}/.config/hydrate" "${st#/}" || { echo "Could not back up settings/history. Update cancelled."; return 1; }
+  mkdir -p "$tmp/data/config" "$tmp/data/state"
+  cp -a "$HOME/.config/hydrate/." "$tmp/data/config/" 2>/dev/null || { echo "Could not snapshot settings."; return 1; }
+  cp -a "$st/." "$tmp/data/state/" 2>/dev/null || { echo "Could not snapshot history."; return 1; }
+  tar -czf "$data_backup" -C "$tmp/data" config state || { echo "Could not back up settings/history. Update cancelled."; return 1; }
 
-  # Back up the installed application/integration files for rollback.
+  # Snapshot the exact application and integration files touched by the installer.
   install_backup="$backup_root/installation.tar.gz"
-  local -a paths=()
-  for path in ".local/bin/hydrate" ".config/systemd/user/hydrate.service" ".config/systemd/user/hydrate.timer" ".config/omarchy/plugins/hydrate" ".config/omarchy/shell.json" ".config/waybar/hydrate.jsonc" ".config/waybar/config.jsonc" ".config/waybar/config" ".config/autostart/hydrate.desktop" ".local/share/applications/hydrate.desktop"; do
-    [[ -e "$HOME/$path" ]] && paths+=("${HOME#/}/$path")
-  done
-  if ((${#paths[@]})); then
-    tar -czf "$install_backup" -C / "${paths[@]}" || { echo "Could not back up installed application files. Update cancelled."; return 1; }
+  paths=(
+    ".local/bin/hydrate" ".config/systemd/user/hydrate.service" ".config/systemd/user/hydrate.timer"
+    ".config/omarchy/plugins/hydrate" ".config/omarchy/shell.json" ".config/omarchy/shell.json.hydrate.bak"
+    ".config/waybar/hydrate.jsonc" ".config/waybar/config.jsonc" ".config/waybar/config"
+    ".config/waybar/config.jsonc.hydrate.bak" ".config/waybar/config.hydrate.bak"
+    ".config/autostart/hydrate.desktop" ".local/share/applications/hydrate.desktop"
+  )
+  local -a existing=()
+  for path in "${paths[@]}"; do [[ -e "$HOME/$path" || -L "$HOME/$path" ]] && existing+=("$path"); done
+  if ((${#existing[@]})); then
+    tar -czf "$install_backup" -C "$HOME" "${existing[@]}" || { echo "Could not back up installed application files. Update cancelled."; return 1; }
   else
     tar -czf "$install_backup" --files-from /dev/null || { echo "Could not create rollback archive. Update cancelled."; return 1; }
   fi
+  printf '%s\n' "${paths[@]}" > "$backup_root/managed-paths.txt"
+  local flags
   flags=$(cat "$HOME/.config/hydrate/install-flags" 2>/dev/null || true)
-
   echo "Backup created: $backup_root"
   echo "Installing Hydrate $available..."
-  # Preserve update origin and the user's selected integration flags.
   if [[ -n "$flags" ]]; then
     # shellcheck disable=SC2086
-    bash "$appdir/install.sh" $flags
-    rc=$?
+    bash "$appdir/install.sh" $flags; rc=$?
   else
-    bash "$appdir/install.sh"
-    rc=$?
+    bash "$appdir/install.sh"; rc=$?
   fi
-  # Some desktop integration commands are best-effort; verify the core install too.
   if (( rc == 0 )); then
     [[ -x "$HOME/.local/bin/hydrate" ]] && "$HOME/.local/bin/hydrate" version 2>/dev/null | grep -Fq "hydrate $available" || rc=1
   fi
+  # Installer defaults must never overwrite a user's settings or drinking history.
+  if (( rc == 0 )); then
+    rm -rf "$HOME/.config/hydrate" "$st"
+    mkdir -p "$HOME/.config/hydrate" "$st"
+    cp -a "$tmp/data/config/." "$HOME/.config/hydrate/" 2>/dev/null || rc=1
+    cp -a "$tmp/data/state/." "$st/" 2>/dev/null || rc=1
+    # Keep the original source/install flags and all user preferences intact.
+    # Verify the restored user data against the pre-update snapshot.
+    diff -qr "$tmp/data/config" "$HOME/.config/hydrate" >/dev/null 2>&1 || rc=1
+    diff -qr "$tmp/data/state" "$st" >/dev/null 2>&1 || rc=1
+  fi
   if (( rc != 0 )); then
-    echo "Update failed. Restoring the previous installation..."
-    rm -rf "$HOME/.config/omarchy/plugins/hydrate"
-    rm -f "$HOME/.local/bin/hydrate" "$HOME/.config/systemd/user/hydrate.service" "$HOME/.config/systemd/user/hydrate.timer" "$HOME/.config/waybar/hydrate.jsonc" "$HOME/.config/autostart/hydrate.desktop" "$HOME/.local/share/applications/hydrate.desktop"
-    tar -xzf "$install_backup" -C / || echo "WARNING: application rollback had an error; backup is at $install_backup"
+    echo "Update failed verification. Restoring the previous installation and user data..."
+    for path in "${paths[@]}"; do rm -rf -- "$HOME/$path"; done
+    tar -xzf "$install_backup" -C "$HOME" || echo "WARNING: application rollback had an error; backup is at $install_backup"
+    rm -rf "$HOME/.config/hydrate" "$st"
+    mkdir -p "$HOME/.config/hydrate" "$st"
+    cp -a "$tmp/data/config/." "$HOME/.config/hydrate/" 2>/dev/null || echo "WARNING: settings restore failed"
+    cp -a "$tmp/data/state/." "$st/" 2>/dev/null || echo "WARNING: history restore failed"
     systemctl --user daemon-reload >/dev/null 2>&1 || true
     systemctl --user restart hydrate.timer >/dev/null 2>&1 || true
-    echo "Previous application files restored. Settings/history backup: $data_backup"
+    echo "Previous installation, settings and history restored. Backup: $backup_root"
     return 1
   fi
-  # Installer writes its source folder; replace that transient temp path with stable repository URL.
-  printf '%s\n' "$repo/tree/$branch/Hydrate" > "$HOME/.config/hydrate/source"
+  systemctl --user daemon-reload >/dev/null 2>&1 || true
+  systemctl --user restart hydrate.timer >/dev/null 2>&1 || true
+  # Keep the five most recent complete update backups.
+  find "$HOME/.local/share/hydrate/backups" -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | sort -r | tail -n +6 | while IFS= read -r old; do rm -rf -- "$old"; done
   echo "Updated successfully: $current -> $available"
-  echo "Settings/history preserved. Backup: $backup_root"
+  echo "Settings/history preserved. Rollback with: hydrate update --rollback"
   return 0
 }
 opts() {
@@ -698,7 +762,7 @@ case "${1:-status}" in
   restore)    restore_cmd "${2:-}"; exit $? ;;
   pause)      setc PAUSED 1; bar ;;
   resume)     setc PAUSED 0; sched; bar ;;
-  update)     update_cmd; exit $? ;;
+  update)     shift; update_cmd "$@"; exit $? ;;
   version|--version|-v) echo "hydrate $VERSION" ;;
   doctor)     doctor ;;
   uninstall)  confirm_remove uninstall "${2:-}" || { echo "Cancelled."; exit 1; }; remove_all; exit 0 ;;

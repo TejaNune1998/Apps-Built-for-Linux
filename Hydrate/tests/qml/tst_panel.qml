@@ -67,10 +67,11 @@ Item {
       wait(60)
       compare(panel.weekTitle(), "OCT 19 - OCT 25")
     }
-    function test_chart_shows_all_seven_days_even_with_weekdays_only() {
+    function test_chart_hides_weekends_when_weekdays_are_selected() {
       host.st = Object.assign({}, host.st, { days: "weekdays", dayoff: [0, 0, 0, 0, 0, 1, 1] })
-      compare(panel.weekCount, 7)
+      compare(panel.weekCount, 5)
       host.st = Object.assign({}, host.st, { days: "all", dayoff: [0, 0, 0, 0, 0, 0, 0] })
+      compare(panel.weekCount, 7)
     }
 
     // ---- keyboard selection of controls
