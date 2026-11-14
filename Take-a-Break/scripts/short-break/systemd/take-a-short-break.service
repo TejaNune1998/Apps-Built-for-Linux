@@ -1,0 +1,9 @@
+[Unit]
+Description=Take a Short Break dialog
+
+[Service]
+Type=oneshot
+ExecCondition=/usr/bin/bash -c '! (( 10#$$(date +%%H%%M) >= 10#@BeforeBreakfast@ && 10#$$(date +%%H%%M) < 10#@AfterBreakfast@ ))'
+ExecCondition=/usr/bin/bash -c '! (( 10#$$(date +%%H%%M) >= 10#@BeforeLunch@ && 10#$$(date +%%H%%M) < 10#@AfterLunch@ ))'
+ExecCondition=/usr/bin/bash -c '! (( 10#$$(date +%%H%%M) >= 10#@BeforeDinner@ && 10#$$(date +%%H%%M) < 10#@AfterDinner@ ))'
+ExecStart=%h/.Take-a-Break/scripts/short-break/taka-a-short-break.sh

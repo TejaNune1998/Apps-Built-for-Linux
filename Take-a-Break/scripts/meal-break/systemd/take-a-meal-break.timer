@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Take a Meal Break
+
+[Timer]
+OnCalendar=*-*-* @Breakfast@
+OnCalendar=*-*-* @Lunch@
+OnCalendar=*-*-* @Dinner@
+
+[Install]
+WantedBy=timers.target
