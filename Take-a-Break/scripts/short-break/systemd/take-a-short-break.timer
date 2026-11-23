@@ -1,0 +1,9 @@
+[Unit]
+Description=Run Take a Short Break every @Interval@ minutes after boot
+
+[Timer]
+OnBootSec=@Interval@min
+OnUnitActiveSec=@Interval@min
+
+[Install]
+WantedBy=timers.target

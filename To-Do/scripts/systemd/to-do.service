@@ -1,0 +1,7 @@
+[Unit]
+Description=To-Do Reminder Notification
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/teja/Documents/scripts/Apps-Built-for-Linux/To-Do/scripts
+ExecStart=/bin/bash /home/teja/Documents/scripts/Apps-Built-for-Linux/To-Do/scripts/reminder.sh

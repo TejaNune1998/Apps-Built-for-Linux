@@ -1,0 +1,6 @@
+[Unit]
+Description=Take a Meal Break dialog
+
+[Service]
+Type=oneshot
+ExecStart=%h/.Take-a-Break/scripts/meal-break/take-a-meal-break.sh
