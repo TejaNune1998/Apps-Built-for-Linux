@@ -74,6 +74,7 @@ setup() {
 	sed -i "s|@DATA_DIR@|$data_dir|g" "$install_dir/scripts/reminder.sh"
 	sed -i "s|@INSTALL_DIR@|$install_dir|g" "$install_dir/scripts/systemd/to-do.service"
 	sed -i "s|@INSTALL_DIR@|$install_dir|g" "$install_dir/scripts/to-do.sh"
+	sed -i "s|@DATA_DIR@|$data_dir|g" "$install_dir/scripts/to-do.sh"
 	cp -ap "$install_dir/scripts/systemd/to-do.service" "$HOME/.config/systemd/user/"
 	cp -ap "$install_dir/scripts/systemd/to-do.timer" "$HOME/.config/systemd/user/"
 
