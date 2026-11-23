@@ -89,7 +89,7 @@ delete_install_dir() {
 }
 delete_systemd() {
 		echo 'Stopping, disabling and removing the enable symlink'
-		systemctl --user disable --now to-do.timer to-do.timer
+		systemctl --user disable --now to-do.timer
 		echo 'Deleting the installed and systemd files'
 		rm ~/.config/systemd/user/to-do.{service,timer}
 		rm ~/.config/systemd/user/to-do.{service,timer}
@@ -99,13 +99,13 @@ delete_systemd() {
 		systemctl --user reset-failed
 
 		echo 'Verifying systemd files..'
-		flg=`systemctl --user list-timers | grep -i break | wc -l`
+		flg=`systemctl --user list-timers | grep -i  to-do | wc -l`
 
 		if [[ $flg != "0" ]]
 		then
 			echo 'Failed.....Please do below manually.'
 
-			echo 'systemctl --user disable --now to-do.timer to-do.timer'
+			echo 'systemctl --user disable --now to-do.timer'
 			echo 'rm ~/.config/systemd/user/to-do.{service,timer}'
 			echo 'rm -rf ~/.To-Do'
 			echo 'systemctl --user daemon-reload'
