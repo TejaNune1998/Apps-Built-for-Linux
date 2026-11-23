@@ -4,7 +4,7 @@ Description=Run To-Do Reminder Every Minute
 [Timer]
 OnBootSec=30s
 OnUnitActiveSec=1min
-Unit=todo-reminder.service
+Unit=to-do.service
 
 [Install]
 WantedBy=timers.target

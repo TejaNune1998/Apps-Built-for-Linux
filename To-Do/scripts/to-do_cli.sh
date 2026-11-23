@@ -1,7 +1,7 @@
 #!/bin/bash
 
-work_dir=$HOME/Documents/To-Do
-install_dir=$PWD
+work_dir=@DATA_DIR@
+install_dir=$HOME/.To-Do
 
 shift_time() {
 	local base_time="$1"
