@@ -160,10 +160,21 @@ build_details() {
 	local dir="$1"
 	local tmp_dir="$dir/.tmp"
 	local sent
+	local latest_worklog
+
+	latest_worklog=$(find "$tmp_dir/worklog" -maxdepth 1 -type f -name '*.md' 2>/dev/null | sort -r | head -n 1)
 
 	{
-		printf '# Title: %s\n\n## Description\n%s\n===\n---\n\n' \
+		printf '# Title: %s\n\n## Description\n%s\n' \
 			"$(cat "$tmp_dir/title")" "$(cat "$tmp_dir/description")"
+
+		if [[ -n "$latest_worklog" ]]; then
+			printf '\n'
+			cat "$latest_worklog"
+			printf '\n'
+		fi
+
+		printf '===\n---\n\n'
 		printf -- '- **Start Time:** %s\n' "$(cat "$tmp_dir/start_time")"
 		printf -- '- **Due Time:** %s\n' "$(cat "$tmp_dir/due_time")"
 		printf -- '- **Priority:** %s\n' "$(cat "$tmp_dir/priority")"
@@ -183,6 +194,63 @@ build_details() {
 			printf -- '- No alerts sent yet.\n'
 		fi
 	} > "$dir/details.md"
+}
+# add_work_log <dir>
+# Saves a work-log entry with its date, time and description.
+add_work_log() {
+	local dir="$1"
+	local worklog_dir="$dir/.tmp/worklog"
+	local description now timestamp log_time worklog_file
+	local suffix=1
+
+	description=$(gum write --header "Work Log Description" --placeholder "What did you work on?") || return
+	[[ -z "$description" ]] && return
+
+	mkdir -p "$worklog_dir"
+
+	now=$(date +%s)
+	timestamp=$(date -d "@$now" '+%Y-%m-%d_%H-%M-%S')
+	log_time=$(date -d "@$now" '+%Y-%m-%d %H:%M')
+	worklog_file="$worklog_dir/$timestamp.md"
+
+	while [[ -e "$worklog_file" ]]; do
+		worklog_file="$worklog_dir/${timestamp}_${suffix}.md"
+		suffix=$((suffix + 1))
+	done
+
+	{
+		printf '### Work Log — %s\n\n' "$log_time"
+		printf '%s\n' "$description"
+	} > "$worklog_file"
+}
+
+# view_work_logs <dir>
+# Displays all saved work logs, newest first.
+view_work_logs() {
+    local worklog_dir="$1/.tmp/worklog"
+    local log_file
+
+    clear
+
+    if [[ ! -d "$worklog_dir" ]] || \
+       [[ -z "$(find "$worklog_dir" -maxdepth 1 -type f -name '*.md' -print -quit)" ]]
+    then
+        echo "No work logs available."
+        read -r -p "Press Enter to return..."
+        return
+    fi
+
+    {
+        printf '# Work Logs\n\n'
+
+        while IFS= read -r log_file; do
+            cat "$log_file"
+            printf '\n---\n\n'
+        done < <(find "$worklog_dir" -maxdepth 1 -type f -name '*.md' | sort -r)
+
+    } | gum format
+
+    read -r -p "Press Enter to return..."
 }
 
 # configure_alerts
@@ -715,13 +783,14 @@ entity_menu() {
 	local dir="$1"
 	local action sub_task sub_task_flg
 	local actions=()
-
+	
 	while true
 	do
+		clear
 		build_details "$dir"
 		gum format < "$dir/details.md"
-
-		actions=("Edit")
+		
+		actions=("Edit" "Add Work Log" "Work Logs")
 		if [[ "$(dirname "$(dirname "$dir")")" == "$work_dir" ]]
 		then
 			actions+=("Add Sub-Task")
@@ -740,6 +809,12 @@ entity_menu() {
 				then
 					return
 				fi
+				;;
+			"Add Work Log")
+				add_work_log "$dir"
+				;;
+			"Work Logs")
+				view_work_logs "$dir"
 				;;
 			"Add Sub-Task")
 				sub_task=$(gum input --placeholder "Enter sub-task name") || continue
