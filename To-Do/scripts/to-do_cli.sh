@@ -162,8 +162,7 @@ build_details() {
 	local sent
 	local latest_worklog
 
-	latest_worklog=$(find "$tmp_dir/worklog" -maxdepth 1 -type f -name '*.md' 2>/dev/null | sort -r | head -n 1)
-
+	latest_worklog=$(find "$dir/worklog" -maxdepth 1 -type f -name '*.md' 2>/dev/null | sort -r | head -n 1)
 	{
 		printf '# Title: %s\n\n## Description\n%s\n' \
 			"$(cat "$tmp_dir/title")" "$(cat "$tmp_dir/description")"
@@ -199,7 +198,7 @@ build_details() {
 # Saves a work-log entry with its date, time and description.
 add_work_log() {
 	local dir="$1"
-	local worklog_dir="$dir/.tmp/worklog"
+	local worklog_dir="$dir/worklog"
 	local description now timestamp log_time worklog_file
 	local suffix=1
 
@@ -224,34 +223,108 @@ add_work_log() {
 	} > "$worklog_file"
 }
 
-# view_work_logs <dir>
-# Displays all saved work logs, newest first.
-view_work_logs() {
-    local worklog_dir="$1/.tmp/worklog"
-    local log_file
+# work_log_menu <task_dir> <worklog_file>
+# Displays a selected work log and provides Edit/Delete options.
+work_log_menu() {
+	local dir="$1"
+    	local file="$2"
+    	local header description new_description action
 
-    clear
+    while true; do
+	    clear
+	    build_details "$dir"
+	    gum format < "$dir/details.md"
+	    echo
+	    echo "----------------------------------------"
+	    echo "Selected Work Log"
+	    echo "----------------------------------------"
+	    gum format < "$file"
+	    echo "----------------------------------------"
 
-    if [[ ! -d "$worklog_dir" ]] || \
-       [[ -z "$(find "$worklog_dir" -maxdepth 1 -type f -name '*.md' -print -quit)" ]]
-    then
-        echo "No work logs available."
-        read -r -p "Press Enter to return..."
-        return
-    fi
+        action=$(gum choose --header "Work Log Options" \
+            "Edit" \
+            "Delete" \
+            "Back") || return
 
-    {
-        printf '# Work Logs\n\n'
+        case "$action" in
+            "Edit")
+                IFS= read -r header < "$file"
+                description=$(tail -n +3 "$file")
 
-        while IFS= read -r log_file; do
-            cat "$log_file"
-            printf '\n---\n\n'
-        done < <(find "$worklog_dir" -maxdepth 1 -type f -name '*.md' | sort -r)
+                new_description=$(gum write \
+                    --header "Edit Work Log" \
+                    --value "$description") || continue
 
-    } | gum format
+                [[ -z "$new_description" ]] && continue
 
-    read -r -p "Press Enter to return..."
+                {
+                    printf '%s\n\n' "$header"
+                    printf '%s\n' "$new_description"
+                } > "$file"
+                ;;
+
+            "Delete")
+                if gum confirm "Delete this work log?"; then
+                    rm -- "$file"
+                    return
+                fi
+                ;;
+
+            "Back")
+                return
+                ;;
+        esac
+    done
 }
+
+# view_work_logs <dir>
+# Lists work logs and opens the selected entry.
+view_work_logs() {
+    local worklog_dir="$1/worklog"
+    local file selected
+    local files=()
+    local choices=()
+    local i
+
+    while true; do
+        clear
+
+        if [[ ! -d "$worklog_dir" ]]; then
+            echo "No work logs available."
+            read -rp "Press Enter to continue..."
+            return
+        fi
+
+        mapfile -t files < <(
+            find "$worklog_dir" -maxdepth 1 -type f -name '*.md' | sort -r
+        )
+
+        if (( ${#files[@]} == 0 )); then
+            echo "No work logs available."
+            read -rp "Press Enter to continue..."
+            return
+        fi
+
+        choices=()
+
+        for file in "${files[@]}"; do
+            choices+=("$(basename "$file" .md | tr '_' ' ')")
+        done
+
+        selected=$(gum choose --header "Work Logs" \
+            "${choices[@]}" "Back") || return
+
+        [[ "$selected" == "Back" ]] && return
+
+        for i in "${!choices[@]}"; do
+            if [[ "${choices[$i]}" == "$selected" ]]; then
+		work_log_menu "$1" "${files[$i]}"
+                break
+            fi
+        done
+    done
+}
+
 
 # configure_alerts
 # Uses start_time and due_time, fills the alerts array (max 5 per run).
@@ -433,7 +506,12 @@ close_tree() {
 	local children=()
 	local child parent target
 
-	mapfile -t children < <(find "$dir" -mindepth 1 -maxdepth 1 -type d ! -name '.*' ! -name 'DONE_*' ! -name 'CANCEL_*')
+	mapfile -t children < <(find "$dir" -mindepth 1 -maxdepth 1 -type d \
+		! -name '.*' \
+        	! -name 'worklog' \
+        	! -name 'DONE_*' \
+        	! -name 'CANCEL_*'
+	)
 	for child in "${children[@]}"
 	do
 		close_tree "$child" "$prefix" "$status"
@@ -540,24 +618,28 @@ spawn_next() {
 	echo "Next occurrence created, due $(display_time "$new_due")."
 }
 
+
 # close_entity <dir> <DONE|CANCEL> <status text>
+# Optionally adds a work log before closing the task/sub-task.
 # Returns 0 only when the folder was renamed (path changed).
-# A repeating task creates its next occurrence when completed; canceling stops the repeat.
 close_entity() {
 	local dir="$1"
 	local prefix="$2"
 	local status="$3"
 	local name sub_count msg recurrence parent folder
 	local snap=""
+	local worklog_choice
 
 	name=$(cat "$dir/.tmp/title")
 	recurrence=$(cat "$dir/.tmp/recurrence" 2>/dev/null)
-	sub_count=$(find "$dir" -mindepth 1 \( -name '.*' -o -name 'DONE_*' -o -name 'CANCEL_*' \) -prune -o -type d -print | wc -l)
+	sub_count=$(find "$dir" -mindepth 1 \
+		\( -name '.*' -o -name 'worklog' -o -name 'DONE_*' -o -name 'CANCEL_*' \) \
+		-prune -o -type d -print | wc -l)
 
-	msg="Mark '$name' as $status ?"
+	msg="Mark '$name' as $status?"
 	if (( sub_count > 0 ))
 	then
-		msg="Mark '$name' and its $sub_count open sub-task(s) as $status ?"
+		msg="Mark '$name' and its $sub_count open sub-task(s) as $status?"
 	fi
 
 	if [[ -n "$recurrence" ]]
@@ -572,6 +654,15 @@ close_entity() {
 
 	if gum confirm "$msg"
 	then
+		worklog_choice=$(gum choose --header "Add a work log before closing?" \
+			"Yes" \
+			"No") || return 1
+
+		if [[ "$worklog_choice" == "Yes" ]]
+		then
+			add_work_log "$dir" || return 1
+		fi
+
 		if [[ -n "$recurrence" && "$prefix" == "DONE" ]]
 		then
 			snap=$(mktemp -d)
