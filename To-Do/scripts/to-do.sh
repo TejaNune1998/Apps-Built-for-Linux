@@ -13,6 +13,9 @@ case "${1:-}" in
     -h|--help)
 	printf -- "--cli for Command Line Interface\n\n--tui for Terminal User Interface\n"
 	;;
+    -v|--version)
+	cat $install_dir/assets/version.txt
+	;;
     *)
         #bash $install_dir/scripts/to-do-tui.sh
         echo 'TUI is in devlopment. So, use CLI --cli'
