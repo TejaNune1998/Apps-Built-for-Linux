@@ -555,14 +555,15 @@ spawn_next() {
 		echo "Could not calculate the next occurrence from '$step'."
 		return 1
 	fi
-
 	k=1
-	while (( $(date -d "$old_due $((k * n)) $unit" +%s) <= now ))
+	while (( $(date -d "$old_start $((k * n)) $unit" +%s) <= now ))
 	do
-		k=$((k + 1))
+    		k=$((k + 1))
 	done
+
 	new_start=$(date -d "$old_start $((k * n)) $unit" '+%Y-%m-%d %H:%M')
 	new_due=$(date -d "$old_due $((k * n)) $unit" '+%Y-%m-%d %H:%M')
+
 
 	# Work the alerts out again from their descriptions (e.g. "1 day before due").
 	if [[ -f "$snap/alerts_template" ]]
