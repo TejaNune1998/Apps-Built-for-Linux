@@ -81,6 +81,7 @@ setup() {
 	systemctl --user enable --now to-do.timer
 	systemctl --user is-enabled to-do.timer
 	echo 'alias to-do="$HOME/.To-Do/scripts/to-do.sh"' >> ~/.bashrc
+	source ~/.bashrc
 }
 
 delete_install_dir() {
@@ -109,6 +110,8 @@ delete_systemd() {
 			echo 'rm -rf ~/.To-Do'
 			echo 'systemctl --user daemon-reload'
 			echo 'systemctl --user reset-failed'
+			sed -i '/\<to-do.sh\>/d' ~/.bashrc
+			source ~/.bashrc
 		fi
 }
 
