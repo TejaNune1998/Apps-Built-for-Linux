@@ -164,7 +164,7 @@ build_details() {
 
 	latest_worklog=$(find "$dir/worklog" -maxdepth 1 -type f -name '*.md' 2>/dev/null | sort -r | head -n 1)
 	{
-		printf '# Title: %s\n\n## Description\n%s\n' \
+		printf '# %s\n\n## Description\n%s\n' \
 			"$(cat "$tmp_dir/title")" "$(cat "$tmp_dir/description")"
 
 		if [[ -n "$latest_worklog" ]]; then
@@ -173,7 +173,7 @@ build_details() {
 			printf '\n'
 		fi
 
-		printf '===\n---\n\n'
+		printf '\n'
 		printf -- '- **Start Time:** %s\n' "$(cat "$tmp_dir/start_time")"
 		printf -- '- **Due Time:** %s\n' "$(cat "$tmp_dir/due_time")"
 		printf -- '- **Priority:** %s\n' "$(cat "$tmp_dir/priority")"

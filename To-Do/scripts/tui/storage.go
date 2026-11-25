@@ -31,6 +31,20 @@ func getDirs(parent string) []item {
 	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].name) < strings.ToLower(out[j].name) })
 	return out
 }
+
+// decorateItems reads task metadata once when a list is loaded. View() then
+// renders cached values instead of repeatedly touching the filesystem.
+func decorateItems(items []item) []item {
+	for i := range items {
+		p := items[i].path
+		items[i].status = readField(p, "status")
+		items[i].dueTime = readField(p, "due_time")
+		items[i].recurrence = readField(p, "recurrence")
+		items[i].childCount = len(getDirs(p))
+	}
+	return items
+}
+
 func readField(dir, name string) string {
 	b, _ := os.ReadFile(filepath.Join(dir, ".tmp", name))
 	return strings.TrimSpace(string(b))
@@ -83,12 +97,12 @@ func buildDetails(dir string) error {
 		latest = logs[len(logs)-1]
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "# Title: %s\n\n## Description\n%s\n", title, desc)
+	fmt.Fprintf(&b, "# %s\n\n## Description\n%s\n", title, desc)
 	if latest != "" {
 		data, _ := os.ReadFile(latest)
 		b.WriteString("\n" + string(data) + "\n")
 	}
-	fmt.Fprintf(&b, "===\n---\n\n- **Start Time:** %s\n- **Due Time:** %s\n- **Priority:** %s\n- **Status:** %s\n- **Repeat:** %s\n\n## Alerts\n", readField(dir, "start_time"), readField(dir, "due_time"), readField(dir, "priority"), readField(dir, "status"), displayRecurrence(readField(dir, "recurrence")))
+	fmt.Fprintf(&b, "- **Start Time:** %s\n- **Due Time:** %s\n- **Priority:** %s\n- **Status:** %s\n- **Repeat:** %s\n\n## Alerts\n", readField(dir, "start_time"), readField(dir, "due_time"), readField(dir, "priority"), readField(dir, "status"), displayRecurrence(readField(dir, "recurrence")))
 	alerts, _ := os.ReadFile(filepath.Join(tmp, "alerts"))
 	found := false
 	for _, line := range strings.Split(strings.TrimSpace(string(alerts)), "\n") {
@@ -118,7 +132,7 @@ func buildDetails(dir string) error {
 	return os.WriteFile(filepath.Join(dir, "details.md"), []byte(b.String()), 0644)
 }
 func (m *model) loadLabels() {
-	m.labels = getDirs(m.workDir)
+	m.labels = decorateItems(getDirs(m.workDir))
 	if m.selectedLabel >= len(m.labels) {
 		m.selectedLabel = len(m.labels) - 1
 	}
@@ -135,10 +149,18 @@ func (m *model) loadTasks() {
 		m.currentParent = ""
 		return
 	}
-	if m.currentParent == "" {
-		m.currentParent = m.selectedLabelPath()
+	m.currentParent = m.selectedLabelPath()
+	m.flattenOpen(m.currentParent, 0)
+	closed := getClosedDirs(m.currentParent)
+	if len(closed) > 0 {
+		m.tasks = append(m.tasks, item{name: fmt.Sprintf("Completed & Canceled (%d)", len(closed)), group: true, expanded: m.closedExpanded})
+		if m.closedExpanded {
+			for _, x := range closed {
+				x.depth = 0
+				m.tasks = append(m.tasks, x)
+			}
+		}
 	}
-	m.tasks = getDirs(m.currentParent)
 	if m.selectedTask >= len(m.tasks) {
 		m.selectedTask = len(m.tasks) - 1
 	}
@@ -153,9 +175,12 @@ func (m *model) loadSelectedTask() {
 		m.details = "No tasks available."
 		m.worklogs = nil
 		m.logs.SetContent("No work logs available.")
+		m.refreshDetails(m.width * 50 / 112)
 		return
 	}
-	_ = buildDetails(p)
+	if !m.tasks[m.selectedTask].closed {
+		_ = buildDetails(p)
+	}
 	b, e := os.ReadFile(filepath.Join(p, "details.md"))
 	if e != nil {
 		m.details = "No details.md available."
@@ -163,6 +188,7 @@ func (m *model) loadSelectedTask() {
 		m.details = string(b)
 	}
 	m.loadWorklogs(p)
+	m.refreshDetails(m.width * 50 / 112)
 }
 func (m *model) loadWorklogs(dir string) {
 	files, _ := filepath.Glob(filepath.Join(dir, "worklog", "*.md"))
@@ -213,4 +239,92 @@ func (m model) taskCounts() string {
 		return nil
 	})
 	return fmt.Sprintf("Open\n  Tasks       %d\n  Sub-tasks   %d\n\nCompleted\n  Tasks       %d\n  Sub-tasks   %d", ot, osub, ct, csub)
+}
+
+// getClosedDirs returns completed/canceled task folders without making them editable.
+func getClosedDirs(parent string) []item {
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return nil
+	}
+	var out []item
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		n := e.Name()
+		prefix := ""
+		if strings.HasPrefix(n, "DONE_") {
+			prefix = "DONE"
+		} else if strings.HasPrefix(n, "CANCEL_") {
+			prefix = "CANCEL"
+		} else {
+			continue
+		}
+		out = append(out, item{name: strings.ReplaceAll(strings.TrimPrefix(n, prefix+"_"), "_", " "), path: filepath.Join(parent, n), status: readField(filepath.Join(parent, n), "status"), dueTime: readField(filepath.Join(parent, n), "due_time"), closed: true, closedPrefix: prefix, childCount: len(getDirs(filepath.Join(parent, n)))})
+	}
+	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].name) < strings.ToLower(out[j].name) })
+	return out
+}
+
+func (m *model) flattenOpen(parent string, depth int) {
+	for _, x := range decorateItems(getDirs(parent)) {
+		x.depth = depth
+		x.expanded = m.expanded[x.path]
+		m.tasks = append(m.tasks, x)
+		if x.expanded {
+			m.flattenOpen(x.path, depth+1)
+		}
+	}
+}
+
+func walkEntities(root string, fn func(string)) {
+	for _, x := range getDirs(root) {
+		fn(x.path)
+		walkEntities(x.path, fn)
+	}
+}
+
+type scheduleItem struct {
+	when                     time.Time
+	kind, title, label, path string
+	subtask                  bool
+}
+
+func (m *model) loadToday() {
+	m.todayItems = nil
+	m.upcomingItems = nil
+	now := time.Now()
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	end := start.AddDate(0, 0, 1)
+	for _, label := range m.labels {
+		walkEntities(label.path, func(p string) {
+			for _, f := range []struct{ name, kind string }{{"start_time", "Start"}, {"due_time", "Due"}} {
+				t, err := parseTaskTime(readField(p, f.name))
+				if err != nil {
+					continue
+				}
+				if f.kind == "Due" && t.Before(now) || (!t.Before(start) && t.Before(end)) {
+					labelName := filepath.Base(label.path)
+					rel, _ := filepath.Rel(label.path, p)
+					sub := strings.Contains(rel, string(os.PathSeparator))
+					x := scheduleItem{when: t, kind: f.kind, title: strings.ReplaceAll(filepath.Base(p), "_", " "), label: strings.ReplaceAll(labelName, "_", " "), path: p, subtask: sub}
+					if !t.Before(start) && t.Before(end) {
+						m.todayItems = append(m.todayItems, x)
+					}
+					if !t.Before(start) && t.Before(start.AddDate(0, 0, 30)) {
+						m.upcomingItems = append(m.upcomingItems, x)
+					}
+				}
+			}
+		})
+	}
+	sort.Slice(m.todayItems, func(i, j int) bool { return m.todayItems[i].when.Before(m.todayItems[j].when) })
+	sort.Slice(m.upcomingItems, func(i, j int) bool { return m.upcomingItems[i].when.Before(m.upcomingItems[j].when) })
+	if m.selectedToday >= len(m.todayItems) {
+		m.selectedToday = len(m.todayItems) - 1
+	}
+	if m.selectedToday < 0 {
+		m.selectedToday = 0
+	}
 }
