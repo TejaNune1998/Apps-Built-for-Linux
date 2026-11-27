@@ -13,7 +13,7 @@ The goal isn't to build a huge suite of applications. It's to create lightweight
 | Application | Description | Status |
 |---|---|---|
 | **[Hydrate](./Hydrate/)** | A water reminder and intake tracker that helps you keep track of your daily water consumption. Includes a desktop panel indicator, GUI, and CLI. | Available |
-| **[Take a Break](.Take-a-Break)** | A small utility that reminds you to take short breaks, stretch a bit, have a coffee , or go for a walk during the day. | Available |
+| **[Take a Break](.Take-a-Break)** | A small utility that reminds you to take short breaks, stretch a bit, have a coffee , or go for a walk during the day. | Available for Omarchy|
 
 ### Planned
 
@@ -21,7 +21,7 @@ These are ideas currently planned for future development. Details and features m
 
 | Application | Description | Status |
 |---|---|---|
-| **To-Do List & Reminder** | A simple way to manage everyday tasks, keep track of things to do, and receive reminders. | Planned |
+| **To-Do List & Reminder** | A simple way to manage everyday tasks, keep track of things to do, and receive reminders. | In-Progress |
 
 More applications may be added over time.
 
