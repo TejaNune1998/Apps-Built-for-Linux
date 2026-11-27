@@ -63,9 +63,25 @@ func readAlerts(dir string) []string {
 	return a
 }
 func addAlerts(dir string, alerts []string) error {
+	tmplFile := filepath.Join(dir, ".tmp", "alerts_template")
+	tb, tmplErr := os.ReadFile(tmplFile)
 	all := append(readAlerts(dir), alerts...)
 	sort.Strings(all)
-	return writeAlerts(dir, all)
+	if e := writeAlerts(dir, all); e != nil {
+		return e
+	}
+	if tmplErr == nil { // keep alerts that already fired in the saved copy
+		var keep []string
+		for _, a := range strings.Split(strings.TrimSpace(string(tb)), "\n") {
+			if a != "" {
+				keep = append(keep, a)
+			}
+		}
+		keep = append(keep, alerts...)
+		sort.Strings(keep)
+		_ = os.WriteFile(tmplFile, []byte(strings.Join(keep, "\n")+"\n"), 0644)
+	}
+	return nil
 }
 func removeAlert(dir, line string) error {
 	all := readAlerts(dir)

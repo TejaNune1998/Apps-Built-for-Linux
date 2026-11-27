@@ -66,12 +66,6 @@ install_dependencies() {
 setup() {
 	mkdir -p "$install_dir"
 	cp -ap "$work_dir/." "$install_dir"
-
-	if ! (cd "$install_dir/scripts/tui" && go mod tidy && go build -o to-do-tui .); then
-		echo "Failed to build the To-Do TUI. Check that Go 1.24.2 or newer is installed."
-		return 1
-	fi
-
 	data_dir=$(gum input --placeholder "To-Do Task Directory Path")
 	data_dir="$data_dir/To-Do"
 	mkdir -p "$data_dir"
@@ -81,7 +75,6 @@ setup() {
 	sed -i "s|@INSTALL_DIR@|$install_dir|g" "$install_dir/scripts/systemd/to-do.service"
 	sed -i "s|@INSTALL_DIR@|$install_dir|g" "$install_dir/scripts/to-do.sh"
 	sed -i "s|@DATA_DIR@|$data_dir|g" "$install_dir/scripts/to-do.sh"
-	mkdir -p "$HOME/.config/systemd/user"
 	cp -ap "$install_dir/scripts/systemd/to-do.service" "$HOME/.config/systemd/user/"
 	cp -ap "$install_dir/scripts/systemd/to-do.timer" "$HOME/.config/systemd/user/"
 
@@ -93,13 +86,14 @@ setup() {
 }
 
 delete_install_dir() {
-	rm -rf "$install_dir"
+	rm -rf $install_dir
 }
 delete_systemd() {
 		echo 'Stopping, disabling and removing the enable symlink'
-		systemctl --user disable --now to-do.timer 2>/dev/null || true
-		echo 'Deleting the systemd user files'
-		rm -f "$HOME"/.config/systemd/user/to-do.service "$HOME"/.config/systemd/user/to-do.timer
+		systemctl --user disable --now to-do.timer
+		echo 'Deleting the installed and systemd files'
+		rm ~/.config/systemd/user/to-do.{service,timer}
+		rm ~/.config/systemd/user/to-do.{service,timer}
 
 		echo 'Making systemd forget them'
 		systemctl --user daemon-reload
@@ -128,8 +122,8 @@ case "${1:-}" in
 	setup
         ;;
     --remove-systemctl)
-        delete_systemd
         delete_install_dir
+	delete_systemd
         ;;
     *)
         echo "Please execute this script as either below"
